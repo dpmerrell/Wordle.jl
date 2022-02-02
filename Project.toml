@@ -1,0 +1,4 @@
+name = "Wordle"
+uuid = "1ceaa333-da95-4591-96a2-9dbb7345047c"
+authors = ["David Merrell <davidpmerrell@gmail.com>"]
+version = "0.1.0"
