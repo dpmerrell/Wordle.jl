@@ -1,25 +1,22 @@
 module Wordle
 
+using JSON
+
 export rank_first_words
 
 ALPHABET = "abcdefghijklmnopqrstuvwxyz"
 CHAR_TO_IDX = Dict(char => idx for (idx, char) in enumerate(ALPHABET))
 N_ALPHA = length(ALPHABET)
 WORD_LEN = 5
-DEFAULT_DICTIONARY_PATH = string(@__DIR__, "/wordle_dictionary.txt")
+WORDLE_WORDS_PATH = string(@__DIR__, "/wordle_words_La.json")
+SCRABBLE_WORDS_PATH = string(@__DIR__, "/scrabble_words.json")
 
+function load_words()
+    
+    wordle_words = JSON.parsefile(WORDLE_WORDS_PATH) 
+    scrabble_words = JSON.parsefile(SCRABBLE_WORDS_PATH)
 
-function load_dictionary(dictionary_path=DEFAULT_DICTIONARY_PATH)
-    lines = open(dictionary_path, "r") do f
-        readlines(f)
-    end
-
-    pairs = [split(line) for line in lines]
-    pairs = [(str_to_vector(p[1]),parse(Int,p[2])) for p in pairs]
-
-    weights = Dict{Vector{Int},Int}(pairs)
-
-    return weights
+    return wordle_words, scrabble_words
 end
 
 
@@ -108,11 +105,6 @@ function (cons::Constraints)(word::Vector{Int})
     if !all(char_counts .>= cons.inclusions)
         return false
     end
-    #for (n_c, n_i) in zip(char_counts, cons.inclusions)
-    #    if n_c < n_i
-    #        return false
-    #    end
-    #end
 
     return true
 end
@@ -211,77 +203,45 @@ end
 
 
 
-
-function compute_entropy(valid_words, word_weight_dict)
-
-    ## Count the occurrences of each (integer) weight.
-    ## Also sum up the total weight.
-    #total_weight = 0
-    #weight_counts = Dict{Int,Int}()
-    #for word in valid_words
-    #    
-    #    weight = word_weight_dict[word]
-    #    
-    #    if haskey(weight_counts, weight)
-    #        weight_counts[weight] += 1
-    #    else
-    #        weight_counts[weight] = 1
-    #    end
-
-    #    total_weight += weight
-    #end
-
-    #probs = Dict([w => w/total_weight for w in keys(weight_counts)])
-
-    #return sum(Float64[-n*probs[w]*log(probs[w]) for (w,n) in weight_counts])
-    return length(valid_words)
-end
-
-
 # Selects the best action, but also mutates the constraints
 # and the set of valid words.
 function score_actions(constraints, valid_words,
-                       action_iter,
-                       word_weight_dict)
+                       action_vec)
 
-    #total_weight = 0
-    #for word in valid_words
-    #    total_weight += word_weight_dict[word]
-    #end
     total_weight = length(valid_words)
 
-    actions = String[]
-    scores = Float64[]
-    for action in action_iter
+    # Pre-allocate the results
+    actions = Vector{String}(undef, length(action_vec))
+    scores = Vector{Float64}(undef, length(action_vec))
 
+
+    Threads.@threads for i=1:length(action_vec)
+
+        action = action_vec[i]
         expected_entropy = 0.0
         for possible_truth in valid_words
 
             clues = wordle_clues(action, possible_truth) 
             new_constraints = update_constraints(constraints, action, clues)
 
-            #new_valid_words = Set{Vector{Int}}()
             n_valid_words = 0
             for word in valid_words
                 if new_constraints(word)
-                    #push!(new_valid_words, word)
                     n_valid_words += 1
                 end
             end
             
-            #entropy = compute_entropy(new_valid_words, word_weight_dict)
-            #expected_entropy += word_weight_dict[possible_truth] * entropy
             expected_entropy += n_valid_words
 
         end
         expected_entropy /= total_weight
 
         action_str = vector_to_str(action)
-        open("start_words.txt", "a") do f
-            write(f, string(action_str, " ", expected_entropy, "\n"))
-        end
-        push!(actions, action_str)
-        push!(scores, expected_entropy)
+        print_str = string(action_str, " ", expected_entropy, "\n")
+        print(print_str)
+
+        actions[i] = action_str
+        scores[i] = expected_entropy
     end
     
     return actions, scores
@@ -291,14 +251,14 @@ end
 function rank_first_words()
 
     constraints = Constraints()
-    weight_dict = load_dictionary()
-    valid_words = Set([k for (k,v) in weight_dict if v > 1])
-    action_iter = sort(collect(keys(weight_dict)))
-    #action_iter = Set(str_to_vector(s) for s in ["stare","aaaaa","vague"])
+    wordle_words, scrabble_words = load_words()
 
-    actions, scores = score_actions(constraints, valid_words,
-                                    action_iter,
-                                    weight_dict)
+    wordle_words = [str_to_vector(w) for w in wordle_words]
+    scrabble_words = [str_to_vector(w) for w in scrabble_words]
+
+    actions, scores = score_actions(constraints, wordle_words,
+                                    scrabble_words)
+
 
     srt_order = sortperm(scores)
     srt_actions = actions[srt_order]
