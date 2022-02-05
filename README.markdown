@@ -31,7 +31,7 @@ And if we assume uniform probability over every valid word, then this is equival
 
 ### The algorithm
 
-My solution isn't elegant. For each turn of the game, it does an exhaustive search for the word that minimizes _average remaining words_.
+My solution isn't elegant. For each turn of the game, it does an exhaustive search for the word that minimizes _average number of remaining words_.
 
 This consists of a nested loop: 
 ```python
