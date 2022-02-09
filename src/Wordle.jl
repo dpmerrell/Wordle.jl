@@ -13,8 +13,10 @@ SCRABBLE_WORDS_PATH = string(@__DIR__, "/scrabble_words.json")
 
 function load_words()
     
-    wordle_words = JSON.parsefile(WORDLE_WORDS_PATH) 
+    wordle_words = JSON.parsefile(WORDLE_WORDS_PATH)
+    wordle_words = convert(Vector{String}, wordle_words)
     scrabble_words = JSON.parsefile(SCRABBLE_WORDS_PATH)
+    scrabble_words = convert(Vector{String}, scrabble_words)
 
     return wordle_words, scrabble_words
 end
@@ -110,6 +112,20 @@ function (cons::Constraints)(word::Vector{Int})
 end
 
 
+function (cons::Constraints)(word::String)
+    return cons(str_to_vector(word))
+end
+
+function (cons::Constraints)(word_vec::Vector{String})
+    result = String[]
+    for w in word_vec
+        if cons(w)
+            push!(result, w)
+        end
+    end
+    return result
+end
+
 function wordle_clues(action::Vector{Int}, truth::Vector{Int})
 
     clues = zeros(Int, WORD_LEN)
@@ -155,13 +171,9 @@ function update_constraints!(cons::Constraints, action::Vector{Int},
 
     for (i, (a, clue)) in enumerate(zip(action, clues))
 
-        # The letter got blacked out -- it doesn't
-        # occur anywhere in the word
-        if clue == 0
-            cons.exclusions[a] = true
         # The letter occurs in the word, but not in this
         # location.
-        elseif clue == 1
+        if clue == 1
             # Add the corresponding "antiposition"
             cons.antipositions[a,i] = true
            
@@ -172,7 +184,8 @@ function update_constraints!(cons::Constraints, action::Vector{Int},
             else
                 valid_occurrences[a] = 1
             end
-        else # clue == 2
+        # The letter occurs at this location!
+        elseif clue == 2
             cons.positions[i] = a 
             
             # Increment the number of *valid* occurrences
@@ -185,15 +198,27 @@ function update_constraints!(cons::Constraints, action::Vector{Int},
         end
     end
 
-    for (char, n) in enumerate(cons.inclusions)
-        if haskey(valid_occurrences, char)
-            cons.inclusions[char] = max(n, valid_occurrences[char])
+    for (a, clue) in zip(action, clues)
+        if (clue == 0) & !haskey(valid_occurrences, a)
+        # The letter got blacked out and has no valid 
+        # occurrences -- it doesn't occur anywhere in the word
+            cons.exclusions[a] = true
         end
+    end
+
+    for (char, n) in valid_occurrences
+        cons.inclusions[char] = max(n, cons.inclusions[char])
     end
 end
 
 
-function update_constraints(cons::Constraints, action::Vector{Int},
+function update_constraints!(cons::Constraints, action::String, clues::Vector{Int})
+    action = str_to_vector(action)
+    update_constraints!(cons, action, clues)
+end
+
+
+function update_constraints(cons::Constraints, action,
                             clues::Vector{Int})
 
     cons_copy = copy(cons)
@@ -205,66 +230,84 @@ end
 
 # Selects the best action, but also mutates the constraints
 # and the set of valid words.
-function score_actions(constraints, valid_words,
-                       action_vec)
-
-    total_weight = length(valid_words)
+function score_actions(constraints::Constraints, valid_words::Vector{Vector{Int}},
+                       action_vec::Vector{Vector{Int}};
+                       rule::String="mean")
 
     # Pre-allocate the results
     actions = Vector{String}(undef, length(action_vec))
     scores = Vector{Float64}(undef, length(action_vec))
 
+    mean_denom = 1.0 / length(valid_words)
 
     Threads.@threads for i=1:length(action_vec)
 
         action = action_vec[i]
-        expected_entropy = 0.0
+        
+        # Reset the score
+        if rule == "mean"
+            action_score = 0.0
+        else # "max"
+            action_score = -Inf
+        end
+
         for possible_truth in valid_words
 
             clues = wordle_clues(action, possible_truth) 
             new_constraints = update_constraints(constraints, action, clues)
 
+            # Compute entropy given this (action,truth) combo
             n_valid_words = 0
             for word in valid_words
                 if new_constraints(word)
-                    n_valid_words += 1
+                    n_valid_words += 1 
                 end
             end
-            
-            expected_entropy += n_valid_words
+           
+            # Update the aggregate score for this action
+            if rule == "mean"
+                action_score += (n_valid_words*mean_denom)
+            else # "max"
+                action_score = max(action_score, n_valid_words)
+            end
 
         end
-        expected_entropy /= total_weight
 
         action_str = vector_to_str(action)
-        print_str = string(action_str, " ", expected_entropy, "\n")
+        print_str = string(action_str, " ", rule ,": ", action_score, "\n")
         print(print_str)
 
         actions[i] = action_str
-        scores[i] = expected_entropy
+        scores[i] = action_score
     end
     
-    return actions, scores
+    srt_order = sortperm(scores)
+    srt_actions = actions[srt_order]
+    srt_scores = scores[srt_order]
+    
+    return srt_actions, srt_scores
 end
 
 
-function rank_first_words()
+function score_actions(constraints::Constraints, valid_words::Vector{String},
+                       action_vec::Vector{String}; kwargs...)
+    return score_actions(constraints, Vector{Int}[str_to_vector(s) for s in valid_words],
+                                      Vector{Int}[str_to_vector(s) for s in action_vec];
+                                      kwargs...
+                        )
+end
+
+
+function rank_first_words(;rule::String="mean")
 
     constraints = Constraints()
     wordle_words, scrabble_words = load_words()
 
-    wordle_words = [str_to_vector(w) for w in wordle_words]
-    scrabble_words = [str_to_vector(w) for w in scrabble_words]
-
     actions, scores = score_actions(constraints, wordle_words,
-                                    scrabble_words)
+                                    scrabble_words; rule=rule)
 
 
-    srt_order = sortperm(scores)
-    srt_actions = actions[srt_order]
-    srt_scores = scores[srt_order]
-
-    return srt_actions, srt_scores
+    return actions, scores
 end
 
 
