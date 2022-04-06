@@ -13,6 +13,27 @@ A preview of the starter words:
 
 etc.
 
+## Installation and basic usage
+
+Install via Julia's `Pkg`:
+
+`(@v1.6) pkg> add https://github.com/dpmerrell/Wordle.jl`
+
+The package contains an interactive function `play_wordle()`, which will guide you through a game of Wordle and recommend words to you.
+
+```
+julia> using Wordle
+
+julia> play_wordle()
+Recommended starting word: roate
+Enter your 5-letter guess
+roate
+Enter the resulting 5 clues (0=gray, 1=yellow, 2=green)
+02100
+```
+
+etc.
+
 ## Math/algorithmic ideas
 
 ### Entropy minimization
