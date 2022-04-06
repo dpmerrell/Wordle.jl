@@ -2,7 +2,7 @@ module Wordle
 
 using JSON
 
-export rank_first_words
+export rank_first_words, play_wordle
 
 ALPHABET = "abcdefghijklmnopqrstuvwxyz"
 CHAR_TO_IDX = Dict(char => idx for (idx, char) in enumerate(ALPHABET))
@@ -232,7 +232,7 @@ end
 # and the set of valid words.
 function score_actions(constraints::Constraints, valid_words::Vector{Vector{Int}},
                        action_vec::Vector{Vector{Int}};
-                       rule::String="mean")
+                       rule::String="mean", verbose::Bool=false)
 
     # Pre-allocate the results
     actions = Vector{String}(undef, length(action_vec))
@@ -274,8 +274,11 @@ function score_actions(constraints::Constraints, valid_words::Vector{Vector{Int}
         end
 
         action_str = vector_to_str(action)
-        print_str = string(action_str, " ", rule ,": ", action_score, "\n")
-        print(print_str)
+        
+        if verbose
+            print_str = string(action_str, " ", rule ,": ", action_score, "\n")
+            print(print_str)
+        end
 
         actions[i] = action_str
         scores[i] = action_score
@@ -308,6 +311,78 @@ function rank_first_words(;rule::String="mean")
 
 
     return actions, scores
+end
+
+
+function display_recs(recs, scores)
+    k = length(recs)
+    result = ""
+    for (rec, score) in zip(recs[1:k-1], scores[1:k-1])
+        result = string(result, rec, " (", score,"), ")
+    end
+    result = string(result, recs[k], " (", scores[k],")")
+
+    return result
+end
+
+
+function display_valid_words(valid_words; top_k::Int=10)
+    result = ""
+    N = length(valid_words)
+    if N > 10 # Print leading and trailing, with ellipsis
+        result = string(join(valid_words[1:3], ", "), "... ", join(valid_words[N-2:N], ", "))
+    else # Print them all
+        result = join(valid_words, ", ")
+    end
+
+    return result
+end
+
+
+function play_wordle(;rule::String="mean", top_k::Int=10)
+
+    constraints = Constraints()
+    valid_words, scrabble_words = load_words()
+
+    if rule == "mean"
+        recommendation = "roate"
+    elseif rule == "max"
+        recommendation = "stare"
+    end
+
+    println(string("Recommended starting word: ", recommendation))
+    for i=2:6
+        println("Enter your 5-letter guess")
+        action = readline()
+        println("Enter the resulting 5 clues (0=gray, 1=yellow, 2=green)")
+        clues_str = readline()
+
+        clues = [parse(Int,c) for c in clues_str]
+
+        update_constraints!(constraints, action, clues)
+        valid_words = constraints(valid_words)
+
+        if length(valid_words) == 1
+            println(string("Game finished! Only one possible word: ", valid_words[1]))
+            return
+        elseif length(valid_words) == 0
+            println("Game over! No known words satisfy your constraints :(")
+            return
+        else
+            valid_word_str = display_valid_words(valid_words; top_k=top_k)
+            println(string(length(valid_words), " remaining valid words: "))
+            println(valid_word_str)
+        end
+
+        recs, scores = score_actions(constraints, valid_words,
+                                     scrabble_words, rule=rule)
+        recs = recs[1:top_k]
+        scores = scores[1:top_k]
+
+        rec_str = display_recs(recs,scores)
+        println(string("\nRecommended guesses: ", rec_str, "..."))
+    end 
+    println("Ran out of guesses! Game over :(")
 end
 
 
